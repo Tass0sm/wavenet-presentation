@@ -1,0 +1,450 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<title>WaveNet</title>
+<meta name="author" content="Tassos Manganaris"/>
+<style type="text/css">
+.underline { text-decoration: underline; }
+</style>
+<link rel="stylesheet" href="/home/tassos/software/reveal.js/dist/reveal.css"/>
+
+<link rel="stylesheet" href="/home/tassos/software/reveal.js/dist/theme/white.css" id="theme"/>
+
+<link rel="stylesheet" href="./local.css"/>
+<script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.5/MathJax.js?config=TeX-AMS-MML_HTMLorMML"></script>
+</head>
+<body>
+<div class="reveal">
+<div class="slides">
+<section id="sec-title-slide">
+<h1 class="title">WaveNet</h1><h3 class="subtitle">A Generative Model for Raw Audio</h3><h2 class="author">Tassos Manganaris</h2><h2 class="date">March 2023</h2>
+</section>
+
+<section>
+<section id="slide-org9505583">
+<h2 id="org9505583">Introduction</h2>
+<ul>
+<li>Exploring "raw audio generation techniques, inspired by &#x2026; autoregressive
+generative models that model complex distributions"
+<ul>
+<li>PixelCNN (<a href="#/slide-bibliography">van den Oord et al. 2016</a>)</li>
+<li>RNNs (and 1-D convolutions) for Language Models (<a href="#/slide-bibliography">Jozefowicz et al. 2016</a>)</li>
+
+</ul></li>
+<li>"Modeling joint probabilities &#x2026; as products of conditional distributions"</li>
+<li>Can similar approaches succeed in generating wideband (&gt;16,000hz) raw audio waveforms?</li>
+
+</ul>
+
+</section>
+</section>
+<section>
+<section id="slide-org091398b">
+<h2 id="org091398b">WaveNet</h2>
+<p>
+\(p(\mathbf{x})=\prod_{t=1}^{T} p\left(x_{t}\mid x_{1},\ldots,x_{t-1}
+\right)\)
+</p>
+
+<ul>
+<li>\(p\left(x_{t}\mid x_{1},\ldots,x_{t-1}\right)\) is modelled by a stack of
+convolutional layers, like with PixelCNN</li>
+<li>"The output of the model has the same time dimensionality as the input."</li>
+<li>"Outputs a categorical distribution &#x2026; with a softmax layer"</li>
+<li>Trained to optimize log-likelihood</li>
+
+</ul>
+
+</section>
+<section id="slide-orgbb0e185">
+<h3 id="orgbb0e185">Causal Convolutions</h3>
+<ul>
+<li>Convolutions that do not violate the ordering of the model.</li>
+<li>In PixelCNN, implemented with masking.</li>
+<li>In WaveNet, implement by "shifting" output.</li>
+
+</ul>
+
+
+<div id="org86d2a0b" class="figure">
+<p><img src="WaveNet/2023-03-07_03-50-46_screenshot.png" alt="2023-03-07_03-50-46_screenshot.png" />
+</p>
+</div>
+
+
+<div id="orgdd9ba40" class="figure">
+<p><img src="WaveNet/2023-03-07_03-50-22_screenshot.png" alt="2023-03-07_03-50-22_screenshot.png" />
+</p>
+</div>
+
+</section>
+<section id="slide-orgc62f61c">
+<h3 id="orgc62f61c"><i>Dilated</i> Causal Convolutions</h3>
+<ul>
+<li>A convolution where the filter skips input values with a certain step.</li>
+<li>Stacked with exponential dilation factors up to a limit, then repeated.</li>
+<li>Receptive field grows exponentially with number of hidden layers.</li>
+
+</ul>
+
+<p>
+\(1, 2, 4, \ldots 512, 1, 2, 4, \ldots 512, 1, 2, 4, \ldots 512\)
+<img src="wavenet.gif" alt="wavenet.gif" />
+</p>
+
+</section>
+<section id="slide-orgcf4e871">
+<h3 id="orgcf4e871">Softmax Distributions</h3>
+<ul>
+<li>PixelCNN used softmax over mixtures of Gaussians.</li>
+<li>A problem: raw audio samples are typically quantized with 16 bits \(\Rightarrow\) \(2^{16}\) probabilities.</li>
+<li>Solution: Quantize according to mu-law. Now effectively encoding the signal with 8 bits (<a href="#/slide-bibliography">“Mu-Law Algorithm” 2023</a>).</li>
+
+</ul>
+
+
+<div id="org7aa4ea3" class="figure">
+<p><img src="Mu-law_function.svg" alt="Mu-law_function.svg" class="org-svg" height="450px" />
+</p>
+</div>
+
+</section>
+<section id="slide-orgbf68ad7">
+<h3 id="orgbf68ad7">Gated Activation Units + Residual and Skip Connections</h3>
+
+<div id="orgdc1ca6a" class="figure">
+<p><img src="WaveNet/2023-03-07_04-56-10_screenshot.png" alt="2023-03-07_04-56-10_screenshot.png" />
+</p>
+</div>
+
+
+<p>
+\(\mathbf{z}=\operatorname{tanh}\left(W_{f,k}*\mathbf{x}\right) \odot \sigma\left(W_{g,k}*\mathbf{x}\right)\)
+</p>
+
+<blockquote class="fragment (appear)">
+<p>
+"Another potential advantage is that PixelRNNs contain multiplicative
+units (in the form of the LSTM gates), which may help it to model more complex
+interactions. To amend this we replaced the rectified linear units between the
+masked convolutions in the original pixelCNN with the following gated activation
+unit&#x2026;"
+</p>
+</blockquote>
+
+</section>
+<section id="slide-org9c9a0bc">
+<h3 id="org9c9a0bc">Conditional WaveNets</h3>
+<ul>
+<li>After training, we can generate likely, but incoherent waves.</li>
+
+</ul>
+<p>
+<a href="speaker-1.wav">speaker-1.wav</a>
+</p>
+<ul>
+<li>Modify the model to include an extra vector for conditioning.</li>
+
+</ul>
+<p>
+\(p(\mathbf{x}\mid\mathbf{h})=\prod_{t=1}^{T}p\left(x_{t}\mid x_{1},\dots,x_{t-1},\mathbf{h}\right)\)
+</p>
+
+</section>
+<section id="slide-orga250137">
+<h4 id="orga250137">Global Conditioning</h4>
+<ul>
+<li>"A single latent representation h that influences output distribution
+across all time steps."</li>
+
+</ul>
+
+<p>
+\({\bf z}=\operatorname{tanh}\left(W_{f,k}*{\bf x}+V_{f,k}^{T}{\bf h}\right) \odot \sigma\left(W_{g,k}*{\bf x}+V_{a,k}^{T}{\bf h}\right)\)
+</p>
+
+<ul>
+<li>Result from \(V_{*,k}^{T}{\bf h}\) is broadcast across time dimension, and \(V\) is like a vector with length <code>(n_aux)</code>.</li>
+
+</ul>
+
+</section>
+<section id="slide-orgd5fc82d">
+<h4 id="orgd5fc82d">Local Conditioning</h4>
+<ul>
+<li>\(h_t\), a time series of linguistic features. Therefore, WaveNet plays the role
+of the acoustic model + vocoder.</li>
+<li>Up sample with transposed CNN, so that length of the final time series matches with \(\bf{x}\)</li>
+
+</ul>
+
+<p>
+\(\mathbf{z}=\operatorname{tanh}\left(W_{f,k}*\mathbf{x}+V_{f,k}*\mathbf{y}\right) \odot \sigma\left(W_{g,k}*\mathbf{x}+V_{g,k}*\mathbf{y}\right)\)
+</p>
+
+<ul>
+<li>\(V_{*,k}\) is a 1x1 convolution for each layer, that take <code>n_aux</code> channels and outputs <code>n_quant</code> channels.</li>
+
+</ul>
+
+</section>
+<section id="slide-orgbc63d16">
+<h4 id="orgbc63d16">In Code</h4>
+<ul>
+<li>From ESPNet:</li>
+
+</ul>
+
+<div class="org-src-container">
+
+<pre class="src src-python"><span style="color: #81A1C1;">def</span> <span style="color: #88C0D0;">_residual_forward</span>(
+        <span style="color: #81A1C1;">self</span>,
+        x, <span style="color: #616e88;"># </span><span style="color: #616e88;">series of quantized, one-hot-ed waveform points (B, T, 256).</span>
+        h, <span style="color: #616e88;"># </span><span style="color: #616e88;">upsampled conditioning tensor (B, n_aux, T)</span>
+        dil_sigmoid,
+        dil_tanh,
+        aux_1x1_sigmoid,
+        aux_1x1_tanh,
+        skip_1x1,
+        res_1x1,
+):
+    <span style="color: #D8DEE9;">output_sigmoid</span> = dil_sigmoid(x)
+    <span style="color: #D8DEE9;">output_tanh</span> = dil_tanh(x)
+    <span style="color: #D8DEE9;">aux_output_sigmoid</span> = aux_1x1_sigmoid(h)
+    <span style="color: #D8DEE9;">aux_output_tanh</span> = aux_1x1_tanh(h)
+    <span style="color: #D8DEE9;">output</span> = torch.sigmoid(output_sigmoid + aux_output_sigmoid) * torch.tanh(
+        output_tanh + aux_output_tanh
+    )
+    <span style="color: #D8DEE9;">skip</span> = skip_1x1(output)
+    <span style="color: #D8DEE9;">output</span> = res_1x1(output)
+    <span style="color: #D8DEE9;">output</span> = output + x
+    <span style="color: #81A1C1;">return</span> output, skip
+</pre>
+</div>
+
+</section>
+</section>
+<section>
+<section id="slide-orgf9cf818">
+<h2 id="orgf9cf818">Experiments</h2>
+<div class="outline-text-2" id="text-orgf9cf818">
+</div>
+</section>
+<section id="slide-org130cabc">
+<h3 id="org130cabc">Multi-Speaker Speech Generation</h3>
+<ul>
+<li>Global conditioning for speaker identity (a one-hot vector).</li>
+<li>"able to model speech from any of the [109] speakers"</li>
+<li>"internal representation was shared among multiple speakers"</li>
+<li>"it also mimicked the acoustics and recording quality, as well as the</li>
+
+</ul>
+<p>
+breathing and mouth movements of the speakers."
+</p>
+
+<p>
+<a href="speaker-1.wav">speaker-1.wav</a>
+<a href="speaker-2.wav">speaker-2.wav</a>
+<a href="speaker-3.wav">speaker-3.wav</a>
+<a href="speaker-4.wav">speaker-4.wav</a>
+<a href="speaker-5.wav">speaker-5.wav</a>
+<a href="speaker-6.wav">speaker-6.wav</a>
+</p>
+
+<p>
+(<a href="#/slide-bibliography">“WaveNet: A Generative Model for Raw Audio,” n.d.</a>)
+</p>
+
+</section>
+<section id="slide-orge9f3df6">
+<h3 id="orge9f3df6">Text-To-Speech</h3>
+
+<div id="org146c04d" class="figure">
+<p><img src="Experiments/2023-03-05_08-18-29_screenshot.png" alt="2023-03-05_08-18-29_screenshot.png" />
+</p>
+</div>
+
+<p>
+<a href="parametric-1.wav">parametric-1.wav</a>
+<a href="concatenative-1.wav">concatenative-1.wav</a>
+<a href="wavenet-1.wav">wavenet-1.wav</a>
+<a href="tacotron.wav">tacotron.wav</a>
+</p>
+
+</section>
+<section>
+
+
+<div id="orgc81ea6c" class="figure">
+<p><img src="Experiments/2023-03-05_08-18-56_screenshot.png" alt="2023-03-05_08-18-56_screenshot.png" />
+</p>
+</div>
+
+</section>
+<section id="slide-orgd3cea71">
+<h3 id="orgd3cea71">Music</h3>
+<p>
+<a href="sample_1.wav">sample_1.wav</a>
+<a href="sample_2.wav">sample_2.wav</a>
+<a href="sample_3.wav">sample_3.wav</a>
+<a href="sample_4.wav">sample_4.wav</a>
+<a href="sample_5.wav">sample_5.wav</a>
+<a href="sample_6.wav">sample_6.wav</a>
+</p>
+
+<blockquote>
+<p>
+"We found that enlarging the receptive field was crucial to obtain samples that
+sounded musical. Even with a receptive field of several seconds, the models did
+not enforce long-range consistency which resulted in second-to-second variations
+in genre, instrumentation, volume and sound quality. Nevertheless, the samples
+were often harmonic and aesthetically pleasing, even when produced by
+unconditional models."
+</p>
+</blockquote>
+
+</section>
+<section id="slide-org9819c88">
+<h3 id="org9819c88">Speech Recognition</h3>
+<ul>
+<li>18.8 PER on TIMIT &#x2013; "&#x2026;the best score obtained from a model trained directly on raw audio."</li>
+<li>Required a mean-pooling layer after the dilated convolutions, for aggregating
+activations to coarser frames spanning 10 milliseconds (160× downsampling).</li>
+
+</ul>
+
+</section>
+</section>
+<section>
+<section id="slide-orgece5d51">
+<h2 id="orgece5d51">Conclusion</h2>
+<ul>
+<li class="fragment appear">WaveNets produce raw speech signals with highly-rated naturalness
+<ul>
+<li>Decent Training Time, Slow Generation</li>
+
+</ul></li>
+<li class="fragment appear">Global conditioning can produce a single model that can be used to generate
+different voices, different instruments, etc.</li>
+<li class="fragment appear">The same architecture shows strong results when tested on a small speech
+recognition dataset.</li>
+
+</ul>
+
+</section>
+</section>
+<section>
+<section id="slide-orge4f6ab0">
+<h2 id="orge4f6ab0">Discussion</h2>
+<ul>
+<li class="fragment appear">General Thoughts&#x2026;</li>
+<li class="fragment appear">Moving closer to end-to-end \(\rightarrow\) increasing generality.</li>
+<li class="fragment appear">Pros over recurrent models?
+<ul>
+<li>When training?</li>
+<li>When generating?</li>
+
+</ul></li>
+<li class="fragment appear">Cons?</li>
+
+</ul>
+
+</section>
+<section id="slide-orgfc9243f">
+<h3 id="orgfc9243f">High Cost of Generating Sample by Sample</h3>
+<ul>
+<li>Hours to generate just one second of audio.</li>
+<li>Solutions?</li>
+
+</ul>
+
+</section>
+<section id="slide-orga7f404b">
+<h4 id="orga7f404b">Eliminate Redundant Computations</h4>
+
+<div id="org447bfc1" class="figure">
+<p><img src="Discussion/2023-03-06_19-08-11_screenshot.png" alt="2023-03-06_19-08-11_screenshot.png" />
+</p>
+</div>
+
+<p>
+(<a href="#/slide-bibliography">Paine et al. 2016</a>)
+</p>
+
+</section>
+<section id="slide-org0bf6398">
+<h4 id="org0bf6398">Probability Density Distillation</h4>
+<ul>
+<li>Use a fully-trained WaveNet model to teach a smaller, more parallel student network (<a href="#/slide-bibliography">“High-Fidelity Speech Synthesis with WaveNet,” n.d.</a>).</li>
+
+</ul>
+
+
+<div id="org3a71802" class="figure">
+<p><img src="parallel-wavenet.gif" alt="parallel-wavenet.gif" height="450px" />
+</p>
+</div>
+
+<ul>
+<li>Train student to match teacher's distribution.</li>
+
+</ul>
+
+</section>
+</section>
+<section>
+<section id="slide-bibliography">
+<h2 id="bibliography">Bibliography</h2>
+<style>.csl-entry{text-indent: -1.5em; margin-left: 1.5em;}</style><div class="csl-bib-body">
+  <div class="csl-entry"><a id="citeproc_bib_item_1"></a>“High-Fidelity Speech Synthesis with WaveNet.” n.d. https://www.deepmind.com/blog/high-fidelity-speech-synthesis-with-wavenet.</div>
+  <div class="csl-entry"><a id="citeproc_bib_item_2"></a>Jozefowicz, Rafal, Oriol Vinyals, Mike Schuster, Noam Shazeer, and Yonghui Wu. 2016. “Exploring the Limits of Language Modeling.” arXiv. <a href="https://doi.org/10.48550/arXiv.1602.02410">https://doi.org/10.48550/arXiv.1602.02410</a>.</div>
+  <div class="csl-entry"><a id="citeproc_bib_item_3"></a>“Mu-Law Algorithm.” 2023. <i>Wikipedia</i>, February.</div>
+  <div class="csl-entry"><a id="citeproc_bib_item_4"></a>Oord, Aaron van den, Sander Dieleman, Heiga Zen, Karen Simonyan, Oriol Vinyals, Alex Graves, Nal Kalchbrenner, Andrew Senior, and Koray Kavukcuoglu. 2016. “WaveNet: A Generative Model for Raw Audio.” arXiv. <a href="https://doi.org/10.48550/arXiv.1609.03499">https://doi.org/10.48550/arXiv.1609.03499</a>.</div>
+  <div class="csl-entry"><a id="citeproc_bib_item_5"></a>Paine, Tom Le, Pooya Khorrami, Shiyu Chang, Yang Zhang, Prajit Ramachandran, Mark A. Hasegawa-Johnson, and Thomas S. Huang. 2016. “Fast Wavenet Generation Algorithm.” arXiv. <a href="https://doi.org/10.48550/arXiv.1611.09482">https://doi.org/10.48550/arXiv.1611.09482</a>.</div>
+  <div class="csl-entry"><a id="citeproc_bib_item_6"></a>“WaveNet: A Generative Model for Raw Audio.” n.d. https://www.deepmind.com/blog/wavenet-a-generative-model-for-raw-audio.</div>
+</div>
+</section>
+</section>
+</div>
+</div>
+<script src="/home/tassos/software/reveal.js/dist/reveal.js"></script>
+<script src="/home/tassos/software/reveal.js/plugin/markdown/markdown.js"></script>
+<script src="/home/tassos/software/reveal.js/plugin/notes/notes.js"></script>
+<script src="/home/tassos/software/reveal.js/plugin/search/search.js"></script>
+<script src="/home/tassos/software/reveal.js/plugin/zoom/zoom.js"></script>
+<script>
+// Full list of configuration options available here:
+// https://github.com/hakimel/reveal.js#configuration
+Reveal.initialize({
+
+controls: true,
+progress: true,
+history: true,
+center: true,
+slideNumber: 'c',
+rollingLinks: false,
+keyboard: true,
+mouseWheel: true,
+fragmentInURL: true,
+hashOneBasedIndex: false,
+pdfSeparateFragments: true,
+overview: true,
+width: 1400,
+height: 1000,
+
+transition: 'none',
+transitionSpeed: 'default',
+
+// Plugins with reveal.js 4.x
+plugins: [ RevealMarkdown, RevealNotes, RevealSearch, RevealZoom ],
+
+// Optional libraries used to extend reveal.js
+dependencies: [
+]
+
+});
+</script>
+</body>
+</html>

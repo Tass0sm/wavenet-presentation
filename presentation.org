@@ -1,0 +1,383 @@
+#+title: WaveNet
+#+SUBTITLE: A Generative Model for Raw Audio
+#+author: Tassos Manganaris
+#+date: March 2023
+#+options: toc:nil num:nil
+
+#+options: reveal_history:t reveal_fragmentinurl:t
+#+options: reveal_mousewheel:t reveal_inter_presentation_links:t
+#+options: reveal_width:1400 reveal_height:1000
+#+options: timestamp:nil
+
+#+reveal_trans: none
+#+reveal_theme: white
+#+reveal_title_slide: <h1 class="title">%t</h1><h3 class="subtitle">%s</h3><h2 class="author">%a</h2><h2 class="date">%d</h2>
+#+reveal_extra_css: ./local.css
+
+#+cite_export: csl
+
+#+begin_comment
+Hello I am Tassos
+I'm still new, so forgive me if I say something obvious or sophomoric.
+If I say anything wrong please point it out.
+I am presenting about Wavenet
+
+My presentation will first go through the paper in order. Along the way I'll
+make a few asides for discussion aand making connections to other papers.
+
+Then I'll spend the rest of my time giving prompts for discussion, in the
+direction of criticizing WaveNet and understanding how those problems were
+addressed in subsequent research.
+#+end_comment
+
+* COMMENT Guide lines:
+Starting in week 3, class members will act as moderators for discussion of the
+papers of the week.  We will have roughly 2 presenters each session, responsible
+for 1-2 papers.
+
+Presenters should
+ - Start with a 5 minute introduction of the paper including:
+   - paper themes
+   - 3 takeaway points
+   - connections to other work
+ - The remainder of the presentation should create a discussion-oriented
+   environment where the moderator leads the class but allows for
+   discussion.
+ - Presenters should not restrict themselves to the paper(s), but
+   also bring in other relevant papers with connections, code examples, etc.
+ - Presenters should create their own slides, but may borrow elements from other
+   work (papers, websites, etc) WITH APPROPRIATE CITATION WHERE THE BORROWED
+   ELEMENT IS USED
+* Introduction
+
+#+begin_comment
+The context for the WaveNet is established in the introduction.
+The paper cites two papers in particular.
+
+It mention's the authors previous paper on PixelCNN and this 2016 paper on RNNs for langauge modelling.
+
+The Jozefowicz paper mainly donates the idea of modeling these autoregressive
+conditional distributions and then, in using a sequence of predictions, making a sequence
+
+PixelCNN demonstrates a strategy of many layered causal convolutions in a
+generative model for images.
+
+
+#+end_comment
+
+- Exploring "raw audio generation techniques, inspired by ... autoregressive
+  generative models that model complex distributions"
+  - RNNs (and 1-D convolutions) for Language Models [cite:@jozefowiczExploringLimitsLanguage2016]
+  - PixelCNN [cite:@oordConditionalImageGeneration2016]
+- "Modeling joint probabilities ... as products of conditional distributions"
+- Can similar approaches succeed in generating wideband (>16,000hz) raw audio waveforms?
+
+* WaveNet
+
+#+begin_comment
+The idea is to use this kind of model for the raw audio waveform.
+
+The probability for every sample which is a number, really an integer, depends
+on every sample before it. Or a subset of those preceeding samples.
+#+end_comment
+
+\(p(\mathbf{x})=\prod_{t=1}^{T} p\left(x_{t}\mid x_{1},\ldots,x_{t-1}
+\right)\)
+
+- $p\left(x_{t}\mid x_{1},\ldots,x_{t-1}\right)$ is modelled by a stack of
+  convolutional layers, like with PixelCNN
+- "The output of the model has the same time dimensionality as the input."
+- "Outputs a categorical distribution ... with a softmax layer"
+- Trained to optimize log-likelihood
+
+** Causal Convolutions
+
+- Convolutions that do not violate the ordering of the model.
+- In PixelCNN, implemented with masking.
+- In WaveNet, implement by "shifting" output.
+
+#+DOWNLOADED: screenshot @ 2023-03-07 03:50:46
+[[file:WaveNet/2023-03-07_03-50-46_screenshot.png]]
+
+#+DOWNLOADED: screenshot @ 2023-03-07 03:50:22
+[[file:WaveNet/2023-03-07_03-50-22_screenshot.png]]
+
+*** COMMENT Small Discussion
+#+attr_reveal: :frag (appear)
+- Causal Convolutions remind me of...
+- Wav2Vec [cite:@schneiderWav2vecUnsupervisedPretraining2019]
+- This style of training reminds me of...
+- Listen-Attend-Spell [cite:@chanListenAttendSpell2015]
+
+Extra bits: These aren't recurrent, which is nice for training in several ways.
+
+** /Dilated/ Causal Convolutions
+
+- A convolution where the filter skips input values with a certain step.
+- Stacked with exponential dilation factors up to a limit, then repeated.
+- Receptive field grows exponentially with number of hidden layers.
+
+$1, 2, 4, \ldots 512, 1, 2, 4, \ldots 512, 1, 2, 4, \ldots 512$
+[[file:wavenet.gif]]
+
+** Softmax Distributions
+
+#+begin_comment
+Again: what is this modelling? a categorical distribution for every single
+sample in the raw PCM audio. Why categorical? The audio is quantized
+
+capture much of the range near zero, flatten out at the extremes, because speech
+has high dynamic range.
+
+Small confusion: how does it go between these numbers and sort-of vector / numbers
+https://github.com/vincentherrmann/pytorch-wavenet/blob/26ba28989edcf8688f6216057aafda07601ff07e/wavenet_model.py#L224
+#+end_comment
+
+- PixelCNN used softmax over mixtures of Gaussians.
+- A problem: raw audio samples are typically quantized with 16 bits $\Rightarrow$ $2^{16}$ probabilities.
+- Solution: Quantize according to mu-law. Now effectively encoding the signal with 8 bits [cite:@MulawAlgorithm2023].
+
+#+attr_html: :height 450px
+[[file:Mu-law_function.svg]]
+
+** Gated Activation Units + Residual and Skip Connections
+#+begin_comment
+The next section talks about Gated Activation Units, but I found it hard to
+understand where these fit at this point. So I'm going to quickly say what the
+whole structure is.
+
+First there is a single causal convolution at the beginning:
+
+then there are something like 4 blocks:
+    there are 10 layers in each block:
+        each layer has a filter conv, and a gate conv with dilation 2^i. they can be fused
+        the output of the filter conv goes through the sigmoid and tanh
+        they're element-wise multiplied
+        there's a 1x1 conv which collapses the channels
+        a residual is added
+        there are skip connections which go all the way to the end.
+
+Everything is summed at the end, passed through a ReLU, 1x1, Relu, 1x1, Softmax
+
+So that's how to interpret this:
+#+end_comment
+
+#+DOWNLOADED: screenshot @ 2023-03-07 04:56:10
+[[file:WaveNet/2023-03-07_04-56-10_screenshot.png]]
+
+
+$\mathbf{z}=\operatorname{tanh}\left(W_{f,k}*\mathbf{x}\right) \odot \sigma\left(W_{g,k}*\mathbf{x}\right)$
+
+#+attr_reveal: :frag (appear)
+#+begin_quote
+"Another potential advantage is that PixelRNNs contain multiplicative
+units (in the form of the LSTM gates), which may help it to model more complex
+interactions. To amend this we replaced the rectified linear units between the
+masked convolutions in the original pixelCNN with the following gated activation
+unit..."
+#+end_quote
+
+** Conditional WaveNets
+#+begin_comment
+So now we have a pretty good probability distribution for the population
+represented in our training data.
+
+Let's listen:
+
+Now we want to find the most likely wave given some text, and that's the product
+of the probabilities for every single sample given the text for the whole
+sequence + the wave preceeding.
+
+How do we add that to the model?
+#+end_comment
+
+- After training, we can generate likely, but incoherent waves.
+[[file:speaker-1.wav]]
+- Modify the model to include an extra vector for conditioning.
+$p(\mathbf{x}\mid\mathbf{h})=\prod_{t=1}^{T}p\left(x_{t}\mid x_{1},\dots,x_{t-1},\mathbf{h}\right)$
+
+*** Global Conditioning
+- "A single latent representation h that influences output distribution
+  across all time steps."
+
+${\bf z}=\operatorname{tanh}\left(W_{f,k}*{\bf x}+V_{f,k}^{T}{\bf h}\right) \odot \sigma\left(W_{g,k}*{\bf x}+V_{a,k}^{T}{\bf h}\right)$
+
+- Result from $V_{*,k}^{T}{\bf h}$ is broadcast across time dimension, and $V$ is like a vector with length =(n_aux)=.
+
+*** Local Conditioning
+
+- $h_t$, a time series of linguistic features. Therefore, WaveNet plays the role
+  of the acoustic model + vocoder.
+- Up sample with transposed CNN, so that length of the final time series matches with $\bf{x}$
+
+$\mathbf{z}=\operatorname{tanh}\left(W_{f,k}*\mathbf{x}+V_{f,k}*\mathbf{y}\right) \odot \sigma\left(W_{g,k}*\mathbf{x}+V_{g,k}*\mathbf{y}\right)$
+
+- $V_{*,k}$ is a 1x1 convolution for each layer, that take =n_aux= channels and outputs =n_quant= channels.
+
+*** In Code
+
+- From ESPNet:
+
+#+begin_src python
+def _residual_forward(
+        self,
+        x, # series of quantized, one-hot-ed waveform points (B, T, 256).
+        h, # upsampled conditioning tensor (B, n_aux, T)
+        dil_sigmoid,
+        dil_tanh,
+        aux_1x1_sigmoid,
+        aux_1x1_tanh,
+        skip_1x1,
+        res_1x1,
+):
+    output_sigmoid = dil_sigmoid(x)
+    output_tanh = dil_tanh(x)
+    aux_output_sigmoid = aux_1x1_sigmoid(h)
+    aux_output_tanh = aux_1x1_tanh(h)
+    output = torch.sigmoid(output_sigmoid + aux_output_sigmoid) * torch.tanh(
+        output_tanh + aux_output_tanh
+    )
+    skip = skip_1x1(output)
+    output = res_1x1(output)
+    output = output + x
+    return output, skip
+#+end_src
+
+* Experiments
+** Multi-Speaker Speech Generation
+- Global conditioning for speaker identity (a one-hot vector).
+- "able to model speech from any of the [109] speakers"
+- "internal representation was shared among multiple speakers"
+- "it also mimicked the acoustics and recording quality, as well as the
+breathing and mouth movements of the speakers."
+
+[[file:speaker-1.wav]]
+[[file:speaker-2.wav]]
+[[file:speaker-3.wav]]
+[[file:speaker-4.wav]]
+[[file:speaker-5.wav]]
+[[file:speaker-6.wav]]
+
+[cite:@WaveNetGenerativeModel]
+
+** Text-To-Speech
+
+#+DOWNLOADED: screenshot @ 2023-03-05 08:18:29
+[[file:Experiments/2023-03-05_08-18-29_screenshot.png]]
+
+[[file:parametric-1.wav]]
+[[file:concatenative-1.wav]]
+[[file:wavenet-1.wav]]
+[[file:tacotron.wav]]
+
+#+reveal: split
+
+#+DOWNLOADED: screenshot @ 2023-03-05 08:18:56
+[[file:Experiments/2023-03-05_08-18-56_screenshot.png]]
+
+** Music
+
+[[file:sample_1.wav]]
+[[file:sample_2.wav]]
+[[file:sample_3.wav]]
+[[file:sample_4.wav]]
+[[file:sample_5.wav]]
+[[file:sample_6.wav]]
+
+#+begin_quote
+"We found that enlarging the receptive field was crucial to obtain samples that
+sounded musical. Even with a receptive field of several seconds, the models did
+not enforce long-range consistency which resulted in second-to-second variations
+in genre, instrumentation, volume and sound quality. Nevertheless, the samples
+were often harmonic and aesthetically pleasing, even when produced by
+unconditional models."
+#+end_quote
+
+** Speech Recognition
+
+- 18.8 PER on TIMIT -- "...the best score obtained from a model trained directly on raw audio."
+- Required a mean-pooling layer after the dilated convolutions, for aggregating
+  activations to coarser frames spanning 10 milliseconds (160× downsampling).
+
+* Conclusion
+
+#+attr_reveal: :frag (appear)
+- WaveNets produce raw speech signals with highly-rated naturalness
+  - Decent Training Time, Slow Generation
+- Global conditioning can produce a single model that can be used to generate
+  different voices, different instruments, etc.
+- The same architecture shows strong results when tested on a small speech
+  recognition dataset.
+
+* Discussion
+#+attr_reveal: :frag (appear)
+- General Thoughts...
+- Moving closer to end-to-end $\rightarrow$ increasing generality.
+- Pros over recurrent models?
+  - When training?
+  - When generating?
+- Cons?
+
+** High Cost of Generating Sample by Sample
+#+begin_comment
+Occasionally in the paper they mention the cost.
+Just how expensive? "taking hours to generate just one second of audio"
+[[https://www.deepmind.com/research/highlighted-research/wavenet]]
+#+end_comment
+
+- Hours to generate just one second of audio.
+- Solutions?
+
+*** Eliminate Redundant Computations
+
+#+DOWNLOADED: screenshot @ 2023-03-06 19:08:11
+[[file:Discussion/2023-03-06_19-08-11_screenshot.png]]
+
+[cite:@paineFastWavenetGeneration2016]
+
+#+begin_comment
+"...given a specific set of nodes in the graph, we will have sufficient
+information to compute the current output. We call these nodes the recurrent
+states in reference to recurrent neural networks (RNNs) (Graves, 2013). An
+efficient algorithm can be implemented by caching these recurrent states,
+instead of recomputing them from scratch every time a new sample is generated."
+#+end_comment
+
+*** Probability Density Distillation
+
+- Use a fully-trained WaveNet model to teach a smaller, more parallel student network [cite:@HighfidelitySpeechSynthesis].
+
+#+attr_html: :height 450px
+[[file:parallel-wavenet.gif]]
+
+- Train student to match teacher's distribution.
+
+** COMMENT Other papers?
+** COMMENT Future Papers
+*** Tacotron
+https://www.deepmind.com/blog/wavenet-a-generative-model-for-raw-audio
+https://google.github.io/tacotron/publications/tacotron/index.html
+* Bibliography
+   :PROPERTIES:
+   :CUSTOM_ID: bibliography
+   :END:
+
+#+print_bibliography:
+
+* COMMENT Questions
+** what are some things causal convolutions don't provide. is that a problem?
+** how do we arrive at the temporal convolution network?
+stacking multiple causal convolutions with different dilation factors, so that
+we cover the whole receptive field with multiple learned embeddings
+** advantages of tcn?
+do not back propagate through time, unlike rnn
+therefore they can be trained in parallel
+
+therefore there are not exploding / vanishing gradient problems along the time
+axis (but they can only consider features inside their receptive field).
+** disadvantages of tcn?
+need to determine tcn up front, and its fixed.
+again can only consider features inside their receptive field
+** music
+we didn't mention this when we were discussing the advantages of end-to-end
+models, but with things like this we can generate music
